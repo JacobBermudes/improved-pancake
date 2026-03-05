@@ -99,7 +99,6 @@ func main() {
 	})
 
 	r.GET("/servers", func(c *gin.Context) {
-		gbg := os.Getenv("I_GBG")
 		var cfs []Config
 
 		token := c.GetHeader("Authorization")
@@ -157,7 +156,7 @@ func main() {
 				Name:           token,
 				ApplyISettings: true,
 				ISettings: Is{
-					I1: gbg,
+					I1: "",
 				},
 			}
 			jsonData, err := json.Marshal(payload)
