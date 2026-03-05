@@ -45,7 +45,14 @@ type CrcsReq struct {
 }
 
 type CrcsResp struct {
-	ConfigStr string `json:"config"`
+	Client Clops `json:"client"`
+}
+type Clops struct {
+	Clid string `json:"id"`
+}
+
+type Getcfg struct {
+	Clncfg string `json:"clean_config"`
 }
 
 var rdb *redis.Client
@@ -96,6 +103,7 @@ func main() {
 		var cfs []Config
 
 		token := c.GetHeader("Authorization")
+		token = strings.TrimPrefix(token, "Bearer ")
 
 		am_ips := strings.Split(os.Getenv("AMN_IPS"), ",")
 		am_nms := strings.Split(os.Getenv("SNMS"), ",")
@@ -121,7 +129,7 @@ func main() {
 			req_url := "http://" + am_ip + ":8080"
 			admin_panel := &http.Client{Timeout: 10 * time.Second}
 
-			sr_req, _ := http.NewRequest("GET", req_url + "/api/servers", nil)
+			sr_req, _ := http.NewRequest("GET", req_url+"/api/servers", nil)
 			sr_req.SetBasicAuth(os.Getenv("CONTROL_USNM"), os.Getenv("CONTROL_PASD"))
 			sr_res, err := admin_panel.Do(sr_req)
 			if err != nil {
@@ -157,7 +165,7 @@ func main() {
 				fmt.Printf("Obj parse fail: %v\n", err)
 				return
 			}
-			crcs_req, _ := http.NewRequest("POST", req_url + "/api/servers" + sid + "/client", bytes.NewBuffer(jsonData))
+			crcs_req, _ := http.NewRequest("POST", req_url+"/api/servers/"+sid+"/clients", bytes.NewBuffer(jsonData))
 			crcs_req.Header.Set("Content-Type", "application/json")
 			crcs_req.SetBasicAuth(os.Getenv("CONTROL_USNM"), os.Getenv("CONTROL_PASD"))
 			crcsresp, err := admin_panel.Do(crcs_req)
@@ -170,24 +178,39 @@ func main() {
 			var cfrep CrcsResp
 			cfres, err := io.ReadAll(crcsresp.Body)
 			if err != nil {
+				panic(fmt.Errorf("clid resp read error: %v", err))
+			}
+			if err := json.Unmarshal(cfres, &cfrep); err != nil {
+				fmt.Println("clid resp parse fail:", err)
+				return
+			}
+			rdb.HSet(c, token, "am:id:"+am_ip, cfrep.Client.Clid).Err()
+
+			getcfgurl := req_url + "/api/servers/" + sid + "/clients/" + cfrep.Client.Clid + "/config-both"
+			getcfg_req, _ := http.NewRequest("GET", getcfgurl, bytes.NewBuffer(jsonData))
+			getcfg_req.SetBasicAuth(os.Getenv("CONTROL_USNM"), os.Getenv("CONTROL_PASD"))
+			getcfg_resp, err := admin_panel.Do(getcfg_req)
+			if err != nil {
+				fmt.Printf("Client create req fail: %v\n", err)
+				return
+			}
+			defer getcfg_resp.Body.Close()
+
+			var concfg Getcfg
+			getcfgbody, err := io.ReadAll(getcfg_resp.Body)
+			if err != nil {
 				panic(fmt.Errorf("conf resp read error: %v", err))
 			}
-			if err := json.Unmarshal([]byte(cfres), &cfrep); err != nil {
+			if err = json.Unmarshal(getcfgbody, &concfg); err != nil {
 				fmt.Println("conf resp parse fail:", err)
 				return
 			}
-			target := "[Interface]"
-			startIndex := strings.Index(cfrep.ConfigStr, target)
-			if startIndex == -1 {
-				fmt.Println("Got garbage not config")
-				continue
-			}
-			cf_str := cfrep.ConfigStr[startIndex:]
-			err = rdb.HSet(c, token, "am:"+am_ip, cf_str).Err()
+
+			err = rdb.HSet(c, token, "am:"+am_ip, concfg.Clncfg).Err()
 			if err != nil {
 				cfobj := Config{
 					Name:   am_nms[iter],
-					Config: cf_str,
+					Config: concfg.Clncfg,
 				}
 				cfs = append(cfs, cfobj)
 			}
