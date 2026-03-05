@@ -119,19 +119,23 @@ func main() {
 			}
 
 			req_url := "http://" + am_ip + ":8080"
-			sreq, err := http.Get(req_url + "/api/servers")
+			admin_panel := &http.Client{Timeout: 10 * time.Second}
+
+			sr_req, _ := http.NewRequest("GET", req_url + "/api/servers", nil)
+			sr_req.SetBasicAuth(os.Getenv("CONTROL_USNM"), os.Getenv("CONTROL_PASD"))
+			sr_res, err := admin_panel.Do(sr_req)
 			if err != nil {
 				panic(fmt.Errorf("sreq send error: %v", err))
 			}
-			defer sreq.Body.Close()
+			defer sr_res.Body.Close()
 
 			var amsrs []S_con
 			sid := ""
-			body, err := io.ReadAll(sreq.Body)
+			sr_r_j, err := io.ReadAll(sr_res.Body)
 			if err != nil {
 				panic(fmt.Errorf("sreq read error: %v", err))
 			}
-			if err := json.Unmarshal(body, &amsrs); err != nil {
+			if err := json.Unmarshal(sr_r_j, &amsrs); err != nil {
 				panic(fmt.Errorf("sreq parse error: %v", err))
 			}
 			if len(amsrs) > 0 {
@@ -153,9 +157,10 @@ func main() {
 				fmt.Printf("Obj parse fail: %v\n", err)
 				return
 			}
-			crcsurl := req_url + "/api/servers" + sid + "/client"
-			client := &http.Client{Timeout: 10 * time.Second}
-			crcsresp, err := client.Post(crcsurl, "application/json", bytes.NewBuffer(jsonData))
+			crcs_req, _ := http.NewRequest("POST", req_url + "/api/servers" + sid + "/client", bytes.NewBuffer(jsonData))
+			crcs_req.Header.Set("Content-Type", "application/json")
+			crcs_req.SetBasicAuth(os.Getenv("CONTROL_USNM"), os.Getenv("CONTROL_PASD"))
+			crcsresp, err := admin_panel.Do(crcs_req)
 			if err != nil {
 				fmt.Printf("Client create req fail: %v\n", err)
 				return
