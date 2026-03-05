@@ -1,0 +1,5 @@
+## ENV
+* I_GBG
+* AMN_IPS
+* SNMS
+* REDIS_PASS
