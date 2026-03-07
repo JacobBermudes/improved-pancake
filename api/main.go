@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -39,9 +40,7 @@ type Is struct {
 	I1 string `json:"i1"`
 }
 type CrcsReq struct {
-	Name           string `json:"name"`
-	ApplyISettings bool   `json:"apply_i_settings"`
-	ISettings      Is     `json:"i_settings"`
+	Name string `json:"name"`
 }
 
 type CrcsResp struct {
@@ -56,6 +55,8 @@ type Getcfg struct {
 }
 
 var rdb *redis.Client
+
+const hmacSecret = "abcd"
 
 func initRedis() {
 	rdb = redis.NewClient(&redis.Options{
@@ -78,14 +79,21 @@ func main() {
 
 	r := gin.Default()
 
+	r.Use(AuthMiddleware())
+
 	r.POST("/handshake", func(c *gin.Context) {
-		var req HandshakeRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": "invalid request"})
-			return
+		aid := c.GetHeader("X-Device-Id")
+
+		if aid == "" {
+			var req HandshakeRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(400, gin.H{"error": "invalid request"})
+				return
+			}
+			aid = req.DeviceID
 		}
 
-		err := rdb.HSet(c, "a_id:"+req.DeviceID, "token", req.DeviceID, "is_premium", false, "c_at", time.Now().Format("2006-01-02")).Err()
+		err := rdb.HSet(c, "a_id:"+aid, "token", aid, "is_premium", false, "c_at", time.Now().Format("2006-01-02")).Err()
 		if err != nil {
 			fmt.Printf("HSET error: %v", err)
 			c.JSON(500, gin.H{"error": "redis error"})
@@ -93,7 +101,7 @@ func main() {
 		}
 
 		response := hsresp{
-			Token: "a_id:" + req.DeviceID,
+			Token: "a_id:" + aid,
 		}
 		c.JSON(200, response)
 	})
@@ -101,8 +109,11 @@ func main() {
 	r.GET("/servers", func(c *gin.Context) {
 		var cfs []Config
 
-		token := c.GetHeader("Authorization")
-		token = strings.TrimPrefix(token, "Bearer ")
+		token := c.GetHeader("X-Device-Id")
+		if token == "" {
+			token = c.GetHeader("Authorization")
+			token = strings.TrimPrefix(token, "Bearer ")
+		}
 
 		am_ips := strings.Split(os.Getenv("AMN_IPS"), ",")
 		am_nms := strings.Split(os.Getenv("SNMS"), ",")
@@ -153,11 +164,7 @@ func main() {
 			}
 
 			payload := CrcsReq{
-				Name:           token,
-				ApplyISettings: true,
-				ISettings: Is{
-					I1: "",
-				},
+				Name: token,
 			}
 			jsonData, err := json.Marshal(payload)
 			if err != nil {
@@ -224,10 +231,32 @@ func main() {
 	r.Run(":9090")
 }
 
-func generateToken(length int) (string, error) {
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		signature := c.GetHeader("X-Signature")
+		timestamp := c.GetHeader("X-Timestamp")
+		deviceId := c.GetHeader("X-Device-Id")
+
+		if signature == "" || timestamp == "" {
+			fmt.Println("Empty headers, skipping...")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing headers"})
+			return
+		}
+
+		dataToSign := timestamp + deviceId
+
+		h := hmac.New(sha256.New, []byte(os.Getenv("SECRET_KEY")))
+		h.Write([]byte(dataToSign))
+
+		expectedSignature := hex.EncodeToString(h.Sum(nil))
+
+		if !hmac.Equal([]byte(signature), []byte(expectedSignature)) {
+			fmt.Printf("❌ Mismatch!\nData: %s\nGot: %s\nExp: %s\n",
+				dataToSign, signature, expectedSignature)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
+			return
+		}
+
+		c.Next()
 	}
-	return hex.EncodeToString(b), nil
 }
