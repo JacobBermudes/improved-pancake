@@ -113,6 +113,8 @@ func main() {
 		if token == "" {
 			token = c.GetHeader("Authorization")
 			token = strings.TrimPrefix(token, "Bearer ")
+		} else {
+			token = "a_id:" + token
 		}
 
 		am_ips := strings.Split(os.Getenv("AMN_IPS"), ",")
