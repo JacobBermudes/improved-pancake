@@ -1,6 +1,6 @@
 services:
   sb-api:
-    image: jacobbermudes/sbapi:06
+    image: jacobbermudes/sbapi:07
     container_name: sb-api
     ports:
       - "9090:9090"
@@ -26,7 +26,7 @@ services:
       - surfboost
 
   sb-web-ui:
-    image: jacobbermudes/grandpotato:02
+    image: jacobbermudes/grandpotato:04
     container_name: sb-web-ui
     ports:
       - "8080:8080/tcp"

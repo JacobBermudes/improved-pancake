@@ -40,7 +40,9 @@ type Is struct {
 	I1 string `json:"i1"`
 }
 type CrcsReq struct {
-	Name string `json:"name"`
+	Name           string `json:"name"`
+	ApplyISettings bool   `json:"apply_i_settings"`
+	ISettings      Is     `json:"i_settings"`
 }
 
 type CrcsResp struct {
@@ -109,13 +111,7 @@ func main() {
 	r.GET("/servers", func(c *gin.Context) {
 		var cfs []Config
 
-		token := c.GetHeader("X-Device-Id")
-		if token == "" {
-			token = c.GetHeader("Authorization")
-			token = strings.TrimPrefix(token, "Bearer ")
-		} else {
-			token = "a_id:" + token
-		}
+		token := "a_id:" + c.GetHeader("X-Device-Id")
 
 		am_ips := strings.Split(os.Getenv("AMN_IPS"), ",")
 		am_nms := strings.Split(os.Getenv("SNMS"), ",")
@@ -166,7 +162,11 @@ func main() {
 			}
 
 			payload := CrcsReq{
-				Name: token,
+				Name:           token,
+				ApplyISettings: true,
+				ISettings: Is{
+					I1: os.Getenv("I_GBG"),
+				},
 			}
 			jsonData, err := json.Marshal(payload)
 			if err != nil {
